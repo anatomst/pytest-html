@@ -3,9 +3,11 @@ import json
 import os
 import re
 import warnings
-from collections import defaultdict
-from functools import partial
+from abc import abstractmethod
 from pathlib import Path
+from typing import Any
+from typing import Dict
+from typing import List
 
 import pytest
 from jinja2 import Environment
@@ -14,100 +16,20 @@ from jinja2 import select_autoescape
 
 from pytest_html import __version__
 from pytest_html import extras
+from pytest_html.report_data import ReportData
 from pytest_html.table import Header
 from pytest_html.table import Html
 from pytest_html.table import Row
+from pytest_html.util import _ansi_styles
 from pytest_html.util import cleanup_unserializable
-
-try:
-    from ansi2html import Ansi2HTMLConverter, style
-
-    converter = Ansi2HTMLConverter(inline=False, escaped=False)
-    _handle_ansi = partial(converter.convert, full=False)
-    _ansi_styles = style.get_styles()
-except ImportError:
-    from _pytest.logging import _remove_ansi_escape_sequences
-
-    _handle_ansi = _remove_ansi_escape_sequences
-    _ansi_styles = []
 
 
 class BaseReport:
-    class ReportData:
-        def __init__(self, title, config):
-            self._config = config
-            self._data = {
-                "title": title,
-                "collectedItems": 0,
-                "runningState": "not_started",
-                "environment": {},
-                "tests": defaultdict(list),
-                "resultsTableHeader": {},
-                "additionalSummary": defaultdict(list),
-            }
-
-            collapsed = config.getini("render_collapsed")
-            if collapsed:
-                if collapsed.lower() == "true":
-                    warnings.warn(
-                        "'render_collapsed = True' is deprecated and support "
-                        "will be removed in the next major release. "
-                        "Please use 'render_collapsed = all' instead.",
-                        DeprecationWarning,
-                    )
-                self.set_data(
-                    "collapsed", [outcome.lower() for outcome in collapsed.split(",")]
-                )
-
-        @property
-        def title(self):
-            return self._data["title"]
-
-        @title.setter
-        def title(self, title):
-            self._data["title"] = title
-
-        @property
-        def config(self):
-            return self._config
-
-        @property
-        def data(self):
-            return self._data
-
-        def set_data(self, key, value):
-            self._data[key] = value
-
-        def add_test(self, test_data, report, row, remove_log=False):
-            for sortable, value in row.sortables.items():
-                test_data[sortable] = value
-
-            # regardless of pass or fail we must add teardown logging to "call"
-            if report.when == "teardown" and not remove_log:
-                self.update_test_log(report)
-
-            # passed "setup" and "teardown" are not added to the html
-            if report.when == "call" or (
-                report.when in ["setup", "teardown"] and report.outcome != "passed"
-            ):
-                if not remove_log:
-                    processed_logs = _process_logs(report)
-                    test_data["log"] = _handle_ansi(processed_logs)
-                self._data["tests"][report.nodeid].append(test_data)
-                return True
-
-            return False
-
-        def update_test_log(self, report):
-            log = []
-            for test in self._data["tests"][report.nodeid]:
-                if test["testId"] == report.nodeid and "log" in test:
-                    for section in report.sections:
-                        header, content = section
-                        if "teardown" in header:
-                            log.append(f"{' ' + header + ' ':-^80}")
-                            log.append(content)
-                    test["log"] += _handle_ansi("\n".join(log))
+    """
+    Class that generate HTML reports for pytest. It has methods for generating and rendering
+    report. Some methods are marked as abstract with a pass statement, which should be
+    implemented in subclasses of BaseReport.
+    """
 
     def __init__(self, report_path, config, default_css="style.css"):
         self._report_path = Path(os.path.expandvars(report_path)).expanduser()
@@ -121,15 +43,19 @@ class BaseReport:
         self._max_asset_filename_length = int(
             config.getini("max_asset_filename_length")
         )
-
-        self._report = self.ReportData(self._report_path.name, config)
+        self._report = ReportData(self._report_path.name, config)
 
     @property
     def css(self):
-        # implement in subclasses
+        """
+        Returns CSS styles for the report. Implement in subclasses
+        """
         return
 
     def _asset_filename(self, test_id, extra_index, test_index, file_extension):
+        """
+        Returns the file name
+        """
         return "{}_{}_{}.{}".format(
             re.sub(r"[^\w.]", "_", test_id),
             str(extra_index),
@@ -137,7 +63,11 @@ class BaseReport:
             file_extension,
         )[-self._max_asset_filename_length :]
 
-    def _generate_report(self, self_contained=False):
+    def _generate_report(self, self_contained: bool = False):
+        """
+        Generates the current date and time using the datetime module
+        and stores it in the generated variable.
+        """
         generated = datetime.datetime.now()
         rendered_report = self._render_html(
             generated.strftime("%d-%b-%Y"),
@@ -154,6 +84,9 @@ class BaseReport:
         self._write_report(rendered_report)
 
     def _generate_environment(self):
+        """
+        Generates report metadata environment, checking if variables are redactable.
+        """
         metadata = self._config._metadata
         for key in metadata.keys():
             value = metadata[key]
@@ -163,7 +96,10 @@ class BaseReport:
 
         return metadata
 
-    def _is_redactable_environment_variable(self, environment_variable):
+    def _is_redactable_environment_variable(self, environment_variable) -> bool:
+        """
+        Checks if the provided environment variable is redactable.
+        """
         redactable_regexes = self._config.getini("environment_table_redact_list")
         for redactable_regex in redactable_regexes:
             if re.match(redactable_regex, environment_variable):
@@ -171,13 +107,24 @@ class BaseReport:
 
         return False
 
+    @abstractmethod
     def _data_content(self, *args, **kwargs):
+        """
+        Placeholder method to be implemented in subclasses.
+        """
         pass
 
+    @abstractmethod
     def _media_content(self, *args, **kwargs):
+        """
+        Placeholder method to be implemented in subclasses.
+        """
         pass
 
-    def _process_extras(self, report, test_id):
+    def _process_extras(self, report, test_id) -> List[Dict[str, Any]]:
+        """
+        Check and process extra data formats for the report.
+        """
         test_index = hasattr(report, "rerun") and report.rerun + 1 or 0
         report_extras = getattr(report, "extras", [])
         for extra_index, extra in enumerate(report_extras):
@@ -188,20 +135,23 @@ class BaseReport:
                 test_index,
                 extra["extension"],
             )
-            if extra["format_type"] == extras.FORMAT_JSON:
+            if extra["format_type"] == extras.Format.JSON.value:
                 content = json.dumps(content)
                 extra["content"] = self._data_content(
                     content, asset_name=asset_name, mime_type=extra["mime_type"]
                 )
 
-            if extra["format_type"] == extras.FORMAT_TEXT:
+            if extra["format_type"] == extras.Format.TEXT.value:
                 if isinstance(content, bytes):
                     content = content.decode("utf-8")
                 extra["content"] = self._data_content(
                     content, asset_name=asset_name, mime_type=extra["mime_type"]
                 )
 
-            if extra["format_type"] in [extras.FORMAT_IMAGE, extras.FORMAT_VIDEO]:
+            if extra["format_type"] in [
+                extras.Format.IMAGE.value,
+                extras.Format.VIDEO.value,
+            ]:
                 extra["content"] = self._media_content(
                     content, asset_name=asset_name, mime_type=extra["mime_type"]
                 )
@@ -219,7 +169,10 @@ class BaseReport:
         summary,
         prefix,
         postfix,
-    ):
+    ) -> str:
+        """
+        Renders the html for the report.
+        """
         return self._template.render(
             date=date,
             time=time,
@@ -232,12 +185,15 @@ class BaseReport:
             postfix=postfix,
         )
 
-    def _write_report(self, rendered_report):
+    def _write_report(self, rendered_report: str) -> None:
         with self._report_path.open("w", encoding="utf-8") as f:
             f.write(rendered_report)
 
     @pytest.hookimpl(trylast=True)
     def pytest_sessionstart(self, session):
+        """
+        Generates report metadata for the environment
+        """
         config = session.config
         if hasattr(config, "_metadata") and config._metadata:
             self._report.set_data("environment", self._generate_environment())
@@ -254,6 +210,9 @@ class BaseReport:
 
     @pytest.hookimpl(trylast=True)
     def pytest_sessionfinish(self, session):
+        """
+        Sets report data for additional summary, postfix and generates the report.
+        """
         session.config.hook.pytest_html_results_summary(
             prefix=self._report.data["additionalSummary"]["prefix"],
             summary=self._report.data["additionalSummary"]["summary"],
@@ -264,16 +223,26 @@ class BaseReport:
 
     @pytest.hookimpl(trylast=True)
     def pytest_terminal_summary(self, terminalreporter):
+        """
+        Writes the report file's URL in the terminal.
+        """
         terminalreporter.write_sep(
             "-", f"Generated html report: file://{self._report_path.resolve()}"
         )
 
     @pytest.hookimpl(trylast=True)
     def pytest_collection_finish(self, session):
+        """
+        Sets report data for the number of collected test items.
+        """
         self._report.set_data("collectedItems", len(session.items))
 
     @pytest.hookimpl(trylast=True)
     def pytest_runtest_logreport(self, report):
+        """
+        Adds test data to the report, such as the test execution time, outcome,
+        error, and additional data in the configuration file.
+        """
         if hasattr(report, "duration_formatter"):
             warnings.warn(
                 "'duration_formatter' has been removed and no longer has any effect!",
@@ -307,6 +276,9 @@ class BaseReport:
 
 
 def _process_css(default_css, extra_css):
+    """
+    Processes the CSS for the HTML report.
+    """
     with open(default_css, encoding="utf-8") as f:
         css = f.read()
 
@@ -332,30 +304,17 @@ def _process_css(default_css, extra_css):
     return css
 
 
-def _is_error(report):
+def _is_error(report) -> bool:
+    """
+    Determines if an error has occurred in the report.
+    """
     return report.when in ["setup", "teardown"] and report.outcome == "failed"
 
 
-def _process_logs(report):
-    log = []
-    if report.longreprtext:
-        log.append(report.longreprtext.replace("<", "&lt;").replace(">", "&gt;") + "\n")
-    for section in report.sections:
-        header, content = section
-        log.append(f"{' ' + header + ' ':-^80}")
-        log.append(content)
-
-        # weird formatting related to logs
-        if "log" in header:
-            log.append("")
-            if "call" in header:
-                log.append("")
-    if not log:
-        log.append("No log output captured.")
-    return "\n".join(log)
-
-
-def _process_outcome(report):
+def _process_outcome(report) -> str:
+    """
+    Processes the outcome for the test report.
+    """
     if _is_error(report):
         return "Error"
     if hasattr(report, "wasxfail"):
@@ -368,6 +327,9 @@ def _process_outcome(report):
 
 
 def _read_template(search_paths, template_name="index.jinja2"):
+    """
+    Reads the specified jinja2 template file.
+    """
     env = Environment(
         loader=FileSystemLoader(search_paths),
         autoescape=select_autoescape(
