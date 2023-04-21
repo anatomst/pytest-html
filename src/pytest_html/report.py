@@ -6,6 +6,10 @@ from pytest_html.basereport import BaseReport
 
 
 class Report(BaseReport):
+    """
+    A class representing the pytest report.
+    """
+
     def __init__(self, report_path, config):
         super().__init__(report_path, config)
         self._assets_path = Path(self._report_path.parent, "assets")
@@ -16,14 +20,23 @@ class Report(BaseReport):
             f.write(self._css)
 
     @property
-    def css(self):
+    def css(self) -> Path:
+        """
+        Gets the path to the report's CSS file.
+        """
         return Path(self._assets_path.name, "style.css")
 
-    def _data_content(self, content, asset_name, *args, **kwargs):
+    def _data_content(self, content, asset_name, *args, **kwargs) -> str:
+        """
+        Writes encoded content to a file and returns the path to the file.
+        """
         content = content.encode("utf-8")
         return self._write_content(content, asset_name)
 
-    def _media_content(self, content, asset_name, *args, **kwargs):
+    def _media_content(self, content, asset_name, *args, **kwargs) -> str:
+        """
+        Writes binary media content to a file and returns the path to the file.
+        """
         try:
             media_data = base64.b64decode(content.encode("utf-8"), validate=True)
             return self._write_content(media_data, asset_name)
@@ -31,7 +44,10 @@ class Report(BaseReport):
             # if not base64 content, just return as it's a file or link
             return content
 
-    def _write_content(self, content, asset_name):
+    def _write_content(self, content, asset_name) -> str:
+        """
+        Writes content to a file and returns the path to the file.
+        """
         content_relative_path = Path(self._assets_path, asset_name)
         content_relative_path.write_bytes(content)
         return str(content_relative_path.relative_to(self._report_path.parent))
