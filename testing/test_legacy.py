@@ -51,7 +51,7 @@ class TestReportData:
             ["false", "false"],
         ],
     )
-    def test__handle_render_collapsed__success(self, values, expect):
+    def test_handle_render_collapsed(self, values, expect):
         self.config.getini.return_value = values
         report = ReportData(self.title, self.config)
 
@@ -74,7 +74,7 @@ class TestReportData:
             "log"
         ] == _handle_ansi("Some log.\n")
 
-    def test__process_logs(self):
+    def test_process_logs(self):
         report = Mock()
         report.longreprtext = "Some long error message."
         report.sections = [("section_1", "Some log."), ("teardown", "Some teardown.")]
