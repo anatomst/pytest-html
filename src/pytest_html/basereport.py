@@ -10,12 +10,11 @@ from typing import Dict
 from typing import List
 
 import pytest
-from jinja2 import Environment
-from jinja2 import FileSystemLoader
-from jinja2 import select_autoescape
 
 from pytest_html import __version__
 from pytest_html import extras
+from pytest_html.helpful_functions import _process_outcome
+from pytest_html.helpful_functions import _read_template
 from pytest_html.report_data import ReportData
 from pytest_html.table import Header
 from pytest_html.table import Html
@@ -302,38 +301,3 @@ def _process_css(default_css, extra_css):
         css += "\n".join(ansi_css)
 
     return css
-
-
-def _is_error(report) -> bool:
-    """
-    Determines if an error has occurred in the report.
-    """
-    return report.when in ["setup", "teardown"] and report.outcome == "failed"
-
-
-def _process_outcome(report) -> str:
-    """
-    Processes the outcome for the test report.
-    """
-    if _is_error(report):
-        return "Error"
-    if hasattr(report, "wasxfail"):
-        if report.outcome in ["passed", "failed"]:
-            return "XPassed"
-        if report.outcome == "skipped":
-            return "XFailed"
-
-    return report.outcome.capitalize()
-
-
-def _read_template(search_paths, template_name="index.jinja2"):
-    """
-    Reads the specified jinja2 template file.
-    """
-    env = Environment(
-        loader=FileSystemLoader(search_paths),
-        autoescape=select_autoescape(
-            enabled_extensions=("jinja2",),
-        ),
-    )
-    return env.get_template(template_name)

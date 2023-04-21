@@ -1,6 +1,7 @@
 import warnings
 from collections import defaultdict
 
+from pytest_html.helpful_functions import _process_logs
 from pytest_html.util import _handle_ansi
 
 
@@ -101,25 +102,3 @@ class ReportData:
                         log.append(f"{' ' + header + ' ':-^80}")
                         log.append(content)
                 test["log"] += _handle_ansi("\n".join(log))
-
-
-def _process_logs(report) -> str:
-    """
-    Process the logs for a pytest report.
-    """
-    log = []
-    if report.longreprtext:
-        log.append(report.longreprtext.replace("<", "&lt;").replace(">", "&gt;") + "\n")
-    for section in report.sections:
-        header, content = section
-        log.append(f"{' ' + header + ' ':-^80}")
-        log.append(content)
-
-        # weird formatting related to logs
-        if "log" in header:
-            log.append("")
-            if "call" in header:
-                log.append("")
-    if not log:
-        log.append("No log output captured.")
-    return "\n".join(log)
